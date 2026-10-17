@@ -5,6 +5,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -31,7 +32,8 @@ jobs:
           export APP_ORIGIN=http://127.0.0.1:8000
           backend/.venv/bin/python scripts/seed-test.py
           cd backend
-          uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/cuentas-server.log" 2>&1 &
+          ./.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/cuentas-server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/cuentas-server.pid"
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8000/api/health; then exit 0; fi
             sleep 1
@@ -40,6 +42,12 @@ jobs:
           exit 1
       - run: npm run test:portfolio
         working-directory: frontend
+      - name: Stop isolated server
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/cuentas-server.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/cuentas-server.pid")" || true
+          fi
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
