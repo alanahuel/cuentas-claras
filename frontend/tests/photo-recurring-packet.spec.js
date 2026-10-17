@@ -1,0 +1,33 @@
+import { test, expect } from '@playwright/test';
+test('photo OCR, recurring expense, clients and printable quarter',async({page})=>{
+ const errors=[]; page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('/?registro=1');
+ await page.getByLabel('Tu nombre',{exact:true}).fill('Prueba funciones');
+ await page.getByLabel('Correo electrónico',{exact:true}).fill(`features-${Date.now()}@example.test`);
+ await page.getByLabel('Contraseña',{exact:true}).fill('registration-local-test');await page.getByLabel('Repite la contraseña',{exact:true}).fill('registration-local-test');await page.getByRole('button',{name:'Crear cuenta',exact:true}).click();
+ await page.getByRole('button',{name:'Añadir documento',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Hacer foto',exact:true})).toBeVisible();
+ await expect(page.getByLabel('Capturar foto de factura')).toHaveAttribute('capture','environment');
+ await page.getByLabel('Capturar foto de factura').setInputFiles('tests/fixtures/photo-invoice.jpg');
+ await expect(page.getByLabel('Número de factura',{exact:true})).toHaveValue('F-2026-123',{timeout:45000});
+ await expect(page.getByLabel('Base imponible (€)',{exact:true})).toHaveValue('100.00');
+ await page.getByLabel('Proveedor',{exact:true}).fill('Servicios Ejemplo');
+ await page.locator('.recurring-tools summary').click();await page.getByLabel('Nombre para guardar',{exact:true}).fill('Mi suscripción');await page.getByRole('button',{name:'Guardar gasto recurrente',exact:true}).click();
+ await expect(page.getByText('Gasto recurrente guardado para próximas facturas.',{exact:true})).toBeVisible();
+ await page.setViewportSize({width:1440,height:1000});await page.screenshot({path:'../.impeccable/review/photo-desktop.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});await page.screenshot({path:'../.impeccable/review/photo-mobile.png',fullPage:true});
+ await page.getByLabel('He comprobado el original').check();await page.getByRole('button',{name:'Confirmar y registrar'}).click();await expect(page.getByRole('dialog')).not.toBeVisible();
+ await page.getByRole('button',{name:'Añadir documento',exact:true}).click();await page.locator('.recurring-tools summary').click();
+ await page.getByRole('combobox',{name:'Rellenar desde un gasto recurrente',exact:true}).selectOption({label:'Mi suscripción'});
+ await expect(page.getByLabel('Proveedor',{exact:true})).toHaveValue('Servicios Ejemplo');await expect(page.getByLabel('Base imponible (€)',{exact:true})).toHaveValue('100.00');await expect(page.getByLabel('Número de factura',{exact:true})).toHaveValue('');await expect(page.getByRole('button',{name:'Hacer foto',exact:true})).toBeVisible();
+ await page.getByLabel('Número de factura',{exact:true}).fill('segunda');await page.getByRole('button',{name:'Guardar borrador',exact:true}).click();await expect(page.getByRole('dialog')).not.toBeVisible();
+ await page.getByRole('button',{name:'Añadir documento',exact:true}).click();await page.getByLabel('Ingreso',{exact:true}).check();await page.getByLabel('Cliente',{exact:true}).fill('Cliente habitual');await page.getByLabel('NIF del tercero',{exact:true}).fill('12345678Z');await page.locator('.recurring-tools summary').click();await page.getByLabel('Nombre para guardar',{exact:true}).fill('Cliente habitual');await page.getByRole('button',{name:'Guardar cliente',exact:true}).click();await expect(page.getByText('Cliente guardado para próximos ingresos.',{exact:true})).toBeVisible();await page.getByLabel('Cliente',{exact:true}).fill('');await page.getByRole('combobox',{name:'Rellenar desde un cliente',exact:true}).selectOption('');await page.getByRole('combobox',{name:'Rellenar desde un cliente',exact:true}).selectOption({label:'Cliente habitual'});await expect(page.getByLabel('Cliente',{exact:true})).toHaveValue('Cliente habitual');
+ page.on('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'Cerrar revisión',exact:true}).click();
+ await page.getByRole('button',{name:'Facturas y gastos',exact:true}).click();
+ await page.getByLabel('Ejercicio',{exact:true}).fill('2026');await page.getByLabel('Trimestre',{exact:true}).selectOption('3');
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();
+ await page.screenshot({path:'../.impeccable/review/packet-mobile.png',fullPage:true});
+ for(const [label,ext] of [['PDF para imprimir','pdf'],['Descargar carpeta ZIP','zip']]){const download=page.waitForEvent('download');await page.getByRole('button',{name:label,exact:true}).click();const file=await download;expect(file.suggestedFilename()).toBe(`cuentas-2026-T3.${ext}`);expect(await file.failure()).toBeNull();}
+ await page.getByRole('button',{name:'Opciones de mi cuenta',exact:true}).click();await page.getByRole('button',{name:'Información',exact:true}).click();await expect(page.getByRole('heading',{name:'Cuentas en tu móvil',exact:true})).toBeVisible();
+ expect(errors).toEqual([]);
+});

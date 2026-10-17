@@ -1,0 +1,70 @@
+import { test, expect } from '@playwright/test';
+
+test('dated report, print, temporary sharing and revocation', async ({ page, browser }) => {
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.goto('/?registro=1');
+  await page.getByLabel('Tu nombre', { exact: true }).fill('Demostración · Informe contable');
+  await page.getByLabel('Correo electrónico', { exact: true }).fill(`report-${Date.now()}@example.test`);
+  await page.getByLabel('Contraseña', { exact: true }).fill('registration-local-test');
+  await page.getByLabel('Repite la contraseña', { exact: true }).fill('registration-local-test');
+  await page.getByRole('button', { name: 'Crear cuenta', exact: true }).click();
+  await page.getByRole('button', { name: 'Facturas y gastos', exact: true }).click();
+  await page.getByLabel('Ejercicio', { exact: true }).fill('2026');
+  await page.getByLabel('Trimestre', { exact: true }).selectOption('2');
+  const auth = await page.request.get('/api/me');
+  const csrf = (await auth.json()).csrf;
+  const saved = await page.request.post('/api/invoices', { headers: {Origin: new URL(page.url()).origin, 'X-CSRF-Token': csrf}, data: {
+    kind: 'income', status: 'confirmed', date: '2026-04-10', number: 'DEMO-001', party: 'Cliente de demostración', nif: 'B12345678',
+    lines: [{description: 'Servicio de ejemplo para comprobar el informe', base: 125000, vat_rate: 21}], withholding: 18750,
+    note: 'Datos ficticios de prueba.', request_id: crypto.randomUUID(),
+  }});
+  expect(saved.ok()).toBeTruthy();
+  await page.reload();
+  await page.getByRole('button', { name: 'Facturas y gastos', exact: true }).click();
+  await page.getByLabel('Trimestre', { exact: true }).selectOption('2');
+  await expect(page.getByRole('heading', {name: 'Informe contable para la gestoría'})).toBeVisible();
+  const previewPromise = page.waitForEvent('popup');
+  await page.getByRole('link', {name: 'Ver informe / Imprimir'}).click();
+  const preview = await previewPromise;
+  await expect(preview.getByRole('heading', {name: 'Informe contable · T2 2026'})).toBeVisible();
+  await expect(preview.getByText('DEMO-001', {exact: false})).toBeVisible();
+  await preview.close();
+  await page.getByLabel('El enlace caduca en').selectOption('1');
+  await page.getByRole('button', {name: 'Crear enlace temporal'}).click();
+  const input = page.getByLabel('Enlace para compartir');
+  await expect(input).toBeVisible();
+  const url = await input.inputValue();
+  await page.setViewportSize({width: 1440, height: 1000});
+  await page.screenshot({path: '../.impeccable/review/report-controls-desktop.png', fullPage: true});
+  await page.setViewportSize({width: 390, height: 844});
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.screenshot({path: '../.impeccable/review/report-controls-mobile.png', fullPage: true});
+  const guest = await browser.newContext();
+  const report = await guest.newPage();
+  report.on('pageerror', e => errors.push(e.message));
+  const response = await report.goto(url);
+  expect(response.headers()['x-robots-tag']).toContain('noindex');
+  await expect(report.locator('#countdown')).toContainText('Quedan');
+  await expect(report.getByText('Cliente de demostración', {exact: true})).toBeVisible();
+  await report.setViewportSize({width: 1440, height: 1000});
+  await report.screenshot({path: '../.impeccable/review/desktop.png', fullPage: true});
+  await report.setViewportSize({width: 390, height: 844});
+  expect(await report.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await report.screenshot({path: '../.impeccable/review/mobile.png', fullPage: true});
+  await report.emulateMedia({media: 'print'});
+  await expect(report.locator('.toolbar')).toBeHidden();
+  await expect(report.getByRole('heading', {name: 'Registros y justificantes', exact: true})).toBeVisible();
+  await report.pdf({path: '../.impeccable/review/informe-demo.pdf', format: 'A4'});
+  await page.getByLabel('Trimestre', {exact: true}).selectOption('3');
+  await expect(page.getByLabel('Enlace para compartir')).toHaveCount(0);
+  await expect(page.getByText('No hay enlaces activos.')).toBeVisible();
+  await page.getByLabel('Trimestre', {exact: true}).selectOption('2');
+  await expect(page.getByRole('button', {name: /^Revocar enlace creado/})).toBeVisible();
+  await page.getByRole('button', {name: /^Revocar enlace creado/}).click();
+  await expect(page.getByText('No hay enlaces activos.')).toBeVisible();
+  expect((await report.reload()).status()).toBe(404);
+  await expect(report.getByRole('heading', {name: 'Informe no disponible'})).toBeVisible();
+  expect(errors).toEqual([]);
+  await guest.close();
+});

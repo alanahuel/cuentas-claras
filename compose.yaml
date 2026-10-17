@@ -1,0 +1,44 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      APP_ORIGIN: https://${APP_DOMAIN:?Configura APP_DOMAIN en .env}
+      COOKIE_SECURE: "true"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DOCUMENT_AI_MODEL: ${DOCUMENT_AI_MODEL:-}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-}
+      ASSISTANT_DAILY_LIMIT: ${ASSISTANT_DAILY_LIMIT:-20}
+      ASSISTANT_MONTHLY_TOKENS: ${ASSISTANT_MONTHLY_TOKENS:-100000}
+      ASSISTANT_GLOBAL_DAILY_LIMIT: ${ASSISTANT_GLOBAL_DAILY_LIMIT:-200}
+      ASSISTANT_GLOBAL_MONTHLY_TOKENS: ${ASSISTANT_GLOBAL_MONTHLY_TOKENS:-1000000}
+    volumes:
+      - accounts:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 1g
+    cpus: 2
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+volumes:
+  accounts:
+  caddy_data:
+  caddy_config:

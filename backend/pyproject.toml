@@ -1,0 +1,9 @@
+[project]
+name = "cuentas-autonomos"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "python-multipart>=0.0.20", "pillow>=11", "pymupdf>=1.25", "argon2-cffi>=23"]
+[dependency-groups]
+dev = ["pytest>=8", "httpx>=0.28"]
+[tool.pytest.ini_options]
+pythonpath = ["."]

@@ -1,0 +1,67 @@
+import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+
+test('switch regime with records and check originals across quarters', async ({ page, baseURL }) => {
+  const errors = []; page.on('pageerror', e => errors.push(e.message));
+  page.on('dialog', dialog => dialog.accept());
+  const registered = await page.request.post('/api/register', { headers: { Origin: baseURL }, data: { name: 'Prueba comprobación', email: `checks-${Date.now()}@example.test`, password: 'solo-pruebas-comprobacion' } });
+  expect(registered.status()).toBe(201);
+  const { csrf } = await registered.json();
+  const headers = { Origin: baseURL, 'X-CSRF-Token': csrf };
+  await page.request.put('/api/profile', { headers, data: { regime: 'direct_normal', vat_regime: 'general', irpf_required: 'yes' } });
+  const upload = await page.request.post('/api/documents', { headers, multipart: { file: { name: 'ejemplo.pdf', mimeType: 'application/pdf', buffer: readFileSync('tests/fixtures/autofill-invoice.pdf') } } });
+  expect(upload.ok()).toBeTruthy();
+  const { id: document_id } = await upload.json();
+  const items = [];
+  for (const [number, date, kind, base, did] of [['INGRESO', '2026-09-01', 'income', 100000, null], ['GASTO', '2026-09-02', 'expense', 20000, null], ['FECHA', '2026-10-01', 'expense', 10000, document_id]]) {
+    const response = await page.request.post('/api/invoices', { headers, data: { number, date, kind, document_id: did, party: 'Ejemplo sintético', nif: 'B12345678', status: 'confirmed', lines: [{ base, vat_rate: 21 }], request_id: `check-${number}` } });
+    expect(response.ok()).toBeTruthy(); items.push(await response.json());
+  }
+  await page.goto('/');
+  await page.getByLabel('Ejercicio', { exact: true }).fill('2026');
+  await page.getByLabel('Trimestre', { exact: true }).selectOption('3');
+  await expect(page.locator('.tax-preview .tax-number')).toContainText('328,00');
+  await page.getByRole('button', { name: 'Opciones de mi cuenta', exact: true }).click();
+  await page.getByRole('button', { name: 'Editar perfil', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Régimen de IRPF', exact: true }).selectOption('direct_simplified');
+  await page.getByRole('button', { name: 'Guardar perfil', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Perfil actualizado');
+  await page.getByRole('button', { name: 'Vista general', exact: true }).click();
+  await expect(page.locator('.tax-preview .tax-number')).toContainText('320,00');
+  const called = [], cached = {};
+  await page.route('**/api/invoice-checks', route => route.fulfill({ json: Object.values(cached) }));
+  await page.route('**/api/invoices/*/check*', async route => {
+    const id = route.request().url().split('/invoices/')[1].split('/')[0]; called.push(id);
+    const item = items.find(i => i.id === id);
+    cached[id] = item.document_id ? { invoice_id: id, version: 1, checked_at: 1790899200, status: 'differences', period_change: { recorded: 'T4 2026', detected: 'T3 2026' }, differences: [{ field: 'date', label: 'Fecha de emisión', recorded: '2026-10-01', detected: '2026-09-30' }], missing: ['Retención'], warnings: [] } : { invoice_id: id, version: 1, status: 'no_document' };
+    await route.fulfill({ json: cached[id] });
+  });
+  await page.getByRole('button', { name: 'Facturas y gastos', exact: true }).click();
+  await page.getByRole('button', { name: 'Comprobar todas las facturas', exact: true }).click();
+  await expect(page.locator('.invoice-checks [role=status]')).toContainText('3 de 3');
+  await expect(page.locator('.check-results')).not.toBeVisible();
+  await page.locator('.check-details > summary').click();
+  expect(called.sort()).toEqual(items.map(i => i.id).sort());
+  await expect(page.locator('.check-period')).toContainText('T4 2026 → T3 2026');
+  await expect(page.locator('.check-differences')).toContainText('30/09/2026');
+  await expect(page.getByText('Sin original asociado', { exact: true })).toHaveCount(2);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.screenshot({ path: '../.impeccable/review/invoice-checks-desktop.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.screenshot({ path: '../.impeccable/review/invoice-checks-mobile.png', fullPage: true });
+  const row = page.locator('.check-results > li').filter({ has: page.getByRole('heading', { name: /^FECHA ·/ }) });
+  await row.getByRole('button', { name: 'Revisar registro', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByLabel('Fecha', { exact: true })).toHaveValue('2026-10-01');
+  await page.getByRole('button', { name: 'Cerrar revisión', exact: true }).click();
+  await page.getByRole('button', { name: 'Vista general', exact: true }).click();
+  await page.getByRole('button', { name: 'Facturas y gastos', exact: true }).click();
+  await page.locator('.check-details > summary').click();
+  await expect(page.locator('.check-period')).toBeVisible();
+  await page.route('**/api/invoices/*/check*', route => route.fulfill({ status: 429, json: { detail: 'Límite de comprobaciones. Continúa más tarde.' } }));
+  await page.getByRole('button', { name: 'Comprobar todas las facturas', exact: true }).click();
+  await expect(page.locator('.invoice-checks > [role=alert]')).toContainText('Límite');
+  await expect(page.getByRole('button', { name: 'Comprobar todas las facturas', exact: true })).toBeEnabled();
+  expect(errors).toEqual([]);
+});

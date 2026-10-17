@@ -1,0 +1,52 @@
+import {test,expect} from '@playwright/test';
+test('agency client activation, own chat access and departure disabling login',async({browser})=>{
+  const origin='http://127.0.0.1:8000',manager=await browser.newContext(),customer=await browser.newContext();
+  const email=`owner-access-${Date.now()}@example.test`,clientEmail=`portal-${Date.now()}@example.test`,password='portal-local-password';
+  const registration=await manager.request.post(origin+'/api/register',{headers:{Origin:origin},data:{name:'Gestoría del portal',email,password,account_type:'agency'}});expect(registration.status()).toBe(201);
+  const owner=await registration.json(),headers={Origin:origin,'X-CSRF-Token':owner.csrf};
+  const page=await manager.newPage(),other=await customer.newPage(),errors=[];
+  for(const p of[page,other])p.on('pageerror',e=>errors.push(e.message));
+  await page.goto('/');await page.getByRole('button',{name:'Clientes y equipo',exact:true}).click();
+  await page.getByText('Añadir cliente',{exact:true}).click();
+  await page.getByLabel('Nombre del nuevo cliente',{exact:true}).fill('Cliente Lucía');
+  await page.getByLabel('Correo del nuevo cliente',{exact:true}).fill(clientEmail);
+  for(const width of[1236,390]){await page.setViewportSize({width,height:950});await page.evaluate(()=>window.scrollTo(0,0));expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`../.impeccable/review/client-create-${width}.png`,fullPage:true});}
+  await page.getByRole('button',{name:'Crear cliente e invitación',exact:true}).click();
+  const link=await page.getByLabel('Enlace de activación del cliente',{exact:true}).inputValue();
+  await other.goto(link);
+  await expect(other.getByText(clientEmail,{exact:true})).toBeVisible();
+  for(const width of[1236,390]){await other.setViewportSize({width,height:950});await other.evaluate(()=>window.scrollTo(0,0));expect(await other.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await other.screenshot({path:`../.impeccable/review/client-activate-${width}.png`,fullPage:true});}
+  await other.getByLabel('Elige tu contraseña',{exact:false}).fill(password);
+  await other.getByLabel('Repite tu contraseña de cliente',{exact:true}).fill(password);
+  await other.getByRole('button',{name:'Activar mi acceso',exact:true}).click();
+  await expect(other.getByText('Tu acceso está vinculado a la gestoría.',{exact:false})).toBeVisible();
+  await other.getByRole('button',{name:'Mensajes',exact:true}).click();
+  await other.getByRole('button',{name:/Gestoría del portal/}).click();
+  await other.getByLabel('Mensaje para Gestoría del portal',{exact:true}).fill('Ya tengo acceso a mi cuenta.');
+  await other.getByRole('button',{name:'Enviar',exact:true}).click();
+  await expect(other.getByRole('log')).toContainText('Ya tengo acceso');
+  await page.reload();await page.getByRole('button',{name:/^Mensajes/}).click();
+  await page.getByRole('button',{name:/Cliente Lucía/}).click();
+  await expect(page.getByRole('log')).toContainText('Ya tengo acceso');
+  const spaces=await(await manager.request.get(origin+'/api/workspaces')).json();const cid=spaces.clients[0].id;
+  expect(spaces.clients[0].has_login).toBe(1);
+  await other.getByRole('button',{name:'Opciones de mi cuenta',exact:true}).click();
+  await other.getByRole('button',{name:'Gestoría y accesos',exact:true}).click();
+  await expect(other.getByRole('heading',{name:'Activa tu espacio de gestoría',exact:true})).not.toBeVisible();
+  other.on('dialog',d=>d.accept());await other.getByRole('button',{name:'Salir de la gestoría',exact:true}).click();
+  await expect(other.getByRole('heading',{name:'Entra en tus cuentas',exact:true})).toBeVisible();
+  await other.getByLabel('Correo electrónico',{exact:true}).fill(clientEmail);
+  await other.getByLabel('Contraseña',{exact:true}).fill(password);
+  await other.getByRole('button',{name:'Entrar',exact:true}).click();
+  await expect(other.getByText('Tu acceso de cliente está desactivado porque no tienes una gestoría activa. Contacta con tu gestoría.',{exact:true})).toBeVisible();
+  expect((await(await manager.request.get(origin+'/api/workspaces')).json()).clients.find(c=>c.id===cid).archived).toBe(1);
+  // A pre-existing no-login dossier can also receive its own activation invitation.
+  const legacy=await(await manager.request.post(origin+'/api/agency/clients',{headers,data:{name:'Expediente antiguo'}})).json();
+  await page.reload();await page.getByRole('button',{name:'Clientes y equipo',exact:true}).click();
+  await page.getByRole('button',{name:'Dar acceso al cliente',exact:true}).click();
+  await page.getByLabel('Correo de acceso de Expediente antiguo',{exact:true}).fill(`legacy-${Date.now()}@example.test`);
+  await page.getByRole('button',{name:'Preparar acceso',exact:true}).click();
+  await expect(page.getByLabel('Enlace de activación del cliente',{exact:true})).toHaveValue(/activar-cliente=/);
+  expect(legacy.id).toBeTruthy();expect(errors).toEqual([]);
+  await manager.close();await customer.close();
+});
