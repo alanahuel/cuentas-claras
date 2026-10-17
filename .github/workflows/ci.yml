@@ -38,7 +38,7 @@ jobs:
           done
           cat "$RUNNER_TEMP/cuentas-server.log"
           exit 1
-      - run: npm run test:e2e -- tests/app.spec.js tests/document-autofill.spec.js tests/registration-reserve.spec.js tests/invoice-delete.spec.js
+      - run: npm run test:portfolio
         working-directory: frontend
       - uses: actions/upload-artifact@v4
         if: failure()

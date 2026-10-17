@@ -1,69 +1,75 @@
 # Cuentas Claras
 
-**Facturas y gastos de autónomos, del documento original a un registro revisado.**
+**From invoice files to reviewed records, estimated taxes and a folder ready for an accountant.**
 
-Proyecto full stack con **React, FastAPI y SQLite**, nacido de una necesidad familiar: facilitar a mi padre la gestión de sus cuentas. Permite subir un PDF o una foto, extraer información, corregirla y registrar ingresos y gastos desde el móvil o el ordenador.
-
-El autocompletado es una ayuda: conserva las correcciones manuales y exige revisar el documento antes de contabilizarlo.
+[Español](README.es.md) · [Try the synthetic demo](docs/DEMO.md) · [Architecture decisions](docs/ARCHITECTURE.md)
 
 [![Tests](https://github.com/alanahuel/cuentas-claras/actions/workflows/ci.yml/badge.svg)](https://github.com/alanahuel/cuentas-claras/actions/workflows/ci.yml)
 
-![Resumen trimestral con ingresos, gastos y previsión de impuestos ficticios](docs/images/dashboard-desktop.png)
+A personal full-stack project built with **React, TypeScript, FastAPI and SQLite**, with local PDF/OCR extraction and optional AI-assisted reading. The interface is Spanish; this README supports English-speaking reviewers.
+
+![Quarterly overview showing synthetic income, expenses and estimated taxes](docs/images/dashboard-desktop.png)
 
 <details>
-<summary>Ver el formulario en móvil</summary>
+<summary>Invoice review on mobile</summary>
 
-<img src="docs/images/invoice-mobile.png" alt="Formulario de revisión de una factura sintética en móvil" width="390">
+<img src="docs/images/invoice-mobile.png" alt="Reviewing a synthetic invoice in the mobile form" width="390">
 
 </details>
 
-*Capturas de pruebas automatizadas, con datos exclusivamente ficticios.*
+*Screenshots use synthetic test data only.*
 
-## Una necesidad real
+## The real problem
 
-A mi padre le resulta difícil reunir las facturas para su gestora, no saber de antemano cuánto tendrá que pagar de impuestos y tener que imprimir uno a uno los documentos necesarios. Diseñé el proyecto alrededor de ese recorrido: subir la información de forma sencilla, consultar una estimación y preparar las facturas para entregarlas a la gestora.
+My father struggles with gathering invoices for his accountant, not knowing how much tax he may have to pay, and printing the necessary documents one by one. I planned this application around that workflow: enter documents easily, see an estimate and prepare the invoices for his accountant.
 
-La intención futura es ofrecer una herramienta también a gestorías. Esa versión no se presenta como un producto implementado: el repositorio contiene código exploratorio de colaboración, pero el caso de uso de este portfolio es la preparación de las cuentas del autónomo.
+A product for accounting firms is a future idea. The repository includes exploratory agency/team code; it is not presented as a completed accountant-facing product. The portfolio case is an individual preparing their records and documents.
 
-## Recorrido principal
+## Try it in five minutes
 
-1. Subir una factura en PDF o imagen.
-2. Obtener propuestas mediante extracción de texto/OCR local; opcionalmente, lectura con IA.
-3. Revisar tercero, fecha, bases, IVA y retenciones en el formulario.
-4. Guardar un borrador o confirmar el registro.
-5. Consultar el resumen del periodo y exportar la información.
-
-## Decisiones de interfaz
-
-- **Móvil y escritorio:** interfaz adaptable y PWA instalable para trabajar también con fotos de documentos.
-- **Revisión explícita:** se distingue entre datos detectados, borradores y registros revisados. Los borradores no entran en las estimaciones.
-- **El trabajo manual tiene prioridad:** una respuesta tardía del OCR no sobrescribe campos corregidos, ni siquiera cuando se han vaciado deliberadamente.
-- **Estados visibles:** avisos de lectura fallida, reintento y validación de importes; la lectura local sigue disponible si falla el proveedor externo.
-- **Offline acotado:** borradores locales y sincronización explícita, sin almacenar respuestas privadas de la API en la caché del service worker.
-
-## Implementación que merece revisar
-
-| Área | Código y decisión |
-| --- | --- |
-| Formularios y peticiones | [`main.jsx`](frontend/src/main.jsx): sesión, edición de documentos y comunicación con la API. |
-| Autocompletado | [`documentAutofill.js`](frontend/src/documentAutofill.js): combinación de propuestas y cambios manuales. |
-| Componentes | [`FinancialDashboard.jsx`](frontend/src/FinancialDashboard.jsx), [`InvoiceChecks.jsx`](frontend/src/InvoiceChecks.jsx) y [`ReportSharing.jsx`](frontend/src/ReportSharing.jsx). |
-| API y persistencia | [`main.py`](backend/app/main.py): FastAPI, SQLite, autorización y control de versiones para ediciones concurrentes. |
-| Lectura de documentos | [`ocr.py`](backend/app/ocr.py), [`document_fields.py`](backend/app/document_fields.py) y [`document_ai.py`](backend/app/document_ai.py). |
-| Trabajo sin conexión | [`offline.js`](frontend/src/offline.js): IndexedDB y sincronización idempotente. |
-| Fiabilidad | [`backend/tests`](backend/tests) y [`frontend/tests`](frontend/tests): reglas de negocio, permisos, formularios y flujos de navegador. |
-
-El navegador habla con FastAPI; el servidor valida los registros, guarda importes en céntimos en SQLite y mantiene los originales en almacenamiento privado. La lectura externa es opcional y se configura solo en el servidor. Las contraseñas usan Argon2id, las sesiones cookies HttpOnly y las escrituras protección CSRF.
-
-SQLite simplifica el despliegue de esta aplicación. Como mejora técnica pendiente, los módulos principales de frontend y backend necesitan dividirse en unidades más pequeñas; el proyecto no pretende presentar esa concentración como una arquitectura ideal.
-
-## Ejecutar en local
-
-Requisitos: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 22+ y, para OCR de fotos, Tesseract con español e inglés.
+Requires Python 3.12+, [uv](https://docs.astral.sh/uv/) and Node.js 22+.
 
 ```bash
 git clone https://github.com/alanahuel/cuentas-claras.git
-cd cuentas-claras/frontend
+cd cuentas-claras
+python3 scripts/demo.py
+```
+
+Open **http://localhost:8030**. Sign in with **demo@example.test** / **synthetic-demo-only**.
+
+The launcher installs locked dependencies, builds the app and creates five synthetic records in the current month. It binds to your own computer, disables external AI and uses a temporary database. Ctrl+C stops it and deletes its server data. It does not touch a normal installation's data. These public credentials are for this disposable demo only.
+
+Upload [`autofill-invoice.pdf`](frontend/tests/fixtures/autofill-invoice.pdf) to try local extraction without an API key or Tesseract. See the [guided walkthrough](docs/DEMO.md) for review, editing and export. Photo OCR needs Tesseract with Spanish/English language data. This is a local demo, not a hosted public service.
+
+## User flow and interface decisions
+
+1. Upload a PDF or photo, or enter a record manually.
+2. Review suggested fields alongside the original document.
+3. Correct amounts and counterparties; save a draft or confirm a reviewed record.
+4. Inspect the period summary and prepare CSV, PDF or ZIP exports for the accountant.
+
+**Manual changes win.** A late extraction cannot overwrite fields the user edited, including deliberately cleared values. **Review is explicit.** Drafts are excluded from estimates, and changing a field clears the review checkbox. **Failures are recoverable.** Local reading remains available when the external provider fails, and malformed extraction data is rejected before modifying the form. **Mobile and offline have clear limits.** The PWA supports local drafts and explicit synchronization; private API responses are not cached by the service worker.
+
+## Code worth reviewing
+
+| Responsibility | Implementation |
+| --- | --- |
+| HTTP boundary | [`lib/api.ts`](frontend/src/lib/api.ts): CSRF/workspace headers, multipart requests, normalized errors and session-expiry notification. |
+| Session lifecycle | [`auth/useSession.js`](frontend/src/auth/useSession.js): restoration, sign-in, sign-out and expiry. [`Login.jsx`](frontend/src/auth/Login.jsx) owns the access form. |
+| Invoice workflow | [`InvoiceEditor.tsx`](frontend/src/invoices/InvoiceEditor.tsx): typed state, original preview, manual review and serialization. |
+| Extraction contracts | [`types.ts`](frontend/src/invoices/types.ts): separate API/form models and runtime validation with Zod. |
+| Suggestion merging | [`documentAutofill.ts`](frontend/src/invoices/documentAutofill.ts): partial proposals, protected fields and typed suggestion rendering. |
+| Offline drafts | [`offline.ts`](frontend/src/offline.ts): typed records in IndexedDB, scoped to an authenticated account. |
+| Backend | [`main.py`](backend/app/main.py), [`ocr.py`](backend/app/ocr.py), [`document_fields.py`](backend/app/document_fields.py), [`document_ai.py`](backend/app/document_ai.py). |
+
+The browser calls FastAPI. The backend validates records, stores monetary values as integer cents in SQLite and keeps original files private. Authentication uses Argon2id password hashes, HttpOnly session cookies and CSRF protection. Optimistic versions prevent concurrent edits from silently overwriting each other.
+
+The TypeScript migration covers a complete workflow, not just renamed files: extraction response → suggestions → form state → serialized invoice. Form amounts are strings to preserve empty/partial input; API amounts are integer cents. Unknown network data must pass runtime validation. [Read the tradeoffs and remaining boundaries](docs/ARCHITECTURE.md).
+
+## Run a normal local installation
+
+```bash
+cd frontend
 npm ci
 npm run build
 cd ../backend
@@ -71,53 +77,47 @@ uv sync --frozen
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Abre **http://localhost:8000** y crea una cuenta. No hay contraseñas predeterminadas ni hacen falta claves de IA. El backend crea `backend/data/`, excluido de Git.
+Open **http://localhost:8000** and register. There are no default credentials and no AI keys are required. Local data is created in `backend/data/`, excluded from Git.
 
-Para desarrollo, ejecuta el backend con `APP_ORIGIN=http://localhost:5173` y `npm run dev` en otra terminal dentro de `frontend`; abre ese mismo origen.
+For frontend development, run the backend with `APP_ORIGIN=http://localhost:5173`, run `npm run dev` in `frontend`, and open that exact origin. Optional external reading requires both `OPENAI_API_KEY` and `DOCUMENT_AI_MODEL` in the backend environment; native execution does not automatically load `.env`.
 
-## Pruebas
+## Tests and reproducibility
 
 ```bash
 cd backend
 uv run pytest -q
 cd ../frontend
 npm run test:unit
+npm run typecheck
 npm run build
 ```
 
-Los tests cubren aislamiento entre cuentas, permisos, extracción y validación de documentos, cálculo, informes y eliminación de registros. Las pruebas unitarias del autocompletado verifican específicamente que las sugerencias no borren las correcciones del usuario. Las respuestas de IA se simulan; estas pruebas no acreditan la precisión del proveedor sobre facturas reales.
+Unit tests cover manual-edit preservation, missing proposals, classification, malformed extraction, transport headers and error handling. Browser tests cover the actual form, upload/autofill, offline drafts, registration, deletion, session restoration/expiry and failed logout. Backend tests cover rules, access control and document workflows. Provider responses are simulated; these tests do not measure AI accuracy on real invoices.
 
-Para ejecutar los flujos de navegador con datos sintéticos:
+For isolated browser tests, use a new directory ending in `cuentas-e2e`:
 
 ```bash
-cd frontend
-npx playwright install chromium
-cd ..
-DATA_DIR=/tmp/portfolio-cuentas-e2e backend/.venv/bin/python scripts/seed-test.py
+# From the repository root, after installing/building:
+cd frontend && npx playwright install chromium && cd ..
+DATA_DIR=/tmp/review-cuentas-e2e backend/.venv/bin/python scripts/seed-test.py
 cd backend
-DATA_DIR=/tmp/portfolio-cuentas-e2e APP_ORIGIN=http://127.0.0.1:8000 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
-# En otra terminal, desde frontend:
-npm run test:e2e -- tests/app.spec.js tests/document-autofill.spec.js tests/registration-reserve.spec.js tests/invoice-delete.spec.js
+DATA_DIR=/tmp/review-cuentas-e2e APP_ORIGIN=http://127.0.0.1:8000 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+# In another terminal, from frontend:
+npm run test:portfolio
 ```
 
-Usa un directorio de pruebas nuevo. El script exige que termine en `cuentas-e2e`; genera `demo@example.test` y `test@example.test`, con contraseña exclusivamente de prueba `solo-pruebas-locales`. No ejecutes esta carga sobre datos reales.
+GitHub Actions runs backend tests, frontend unit tests, strict type checking, the production build and the portfolio browser suite. Other exploratory browser suites remain in the repository; they are not all part of this CI job.
 
-GitHub Actions ejecuta las pruebas de backend, las unitarias de frontend, la compilación y estos cuatro flujos de navegador.
+## Ownership and tools
 
-## Origen, aportación y herramientas
+A personal project by **[Alan](https://github.com/alanahuel)**. My confirmed contribution is identifying the family need and defining the product flow: straightforward document entry, estimated taxes and preparation for the accountant, with a possible future product for accounting firms.
 
-Proyecto personal de **[Alan](https://github.com/alanahuel)**, motivado por una necesidad familiar. El código se desarrolló con asistencia de IA. Esta publicación incluye revisión del repositorio, preparación de documentación y ejecución de pruebas con Codex.
+Development has used AI assistance. Codex assisted with the public repository, documentation, this refactor and test execution. This README does not claim that every component was written manually or invent a division of implementation/debugging work. The source, commits, tests and documented decisions make the result inspectable.
 
-Mi aportación confirmada es identificar la necesidad familiar y plantear el recorrido del producto: carga sencilla, previsión de impuestos y preparación de documentos para la gestora, con una posible evolución futura hacia gestorías. El código se ha trabajado con asistencia de IA; no se atribuye la programación manual de cada componente ni un reparto de implementación y depuración que no esté documentado. Los archivos y pruebas enlazados permiten revisar el resultado técnico.
+## Limits and next steps
 
-## Alcance y siguientes mejoras
+This records existing documents and provides estimates; it does not issue certified invoices or submit tax returns. OCR requires human review. Optional AI sends originals to the configured provider. Offline support is limited to drafts, and the application has no 2FA or email recovery.
 
-La aplicación registra documentos existentes y ofrece estimaciones; no emite facturas certificadas ni presenta declaraciones. El OCR puede equivocarse. La integración opcional de IA envía documentos al proveedor configurado y requiere revisar sus condiciones antes de utilizar datos reales.
+`main.jsx` still contains older screens and navigation; the editor is isolated but remains substantial. The backend also needs further modularization. Next steps include extracting remaining screens, accessibility testing and measuring time saved with users. No unmeasured usability outcomes are claimed.
 
-Próximas mejoras: separar rutas y componentes principales, ampliar pruebas de accesibilidad y medir el ahorro de tiempo con usuarios. No se publican métricas de usabilidad que no se hayan medido.
-
-- [Referencia funcional](docs/FUNCIONALIDAD.md)
-- [Alcance y limitaciones](docs/ALCANCE.md)
-- [Despliegue genérico](docs/OPERACION.md)
-
-Esta copia pública contiene código y documentos de prueba sintéticos. El historial privado, los datos familiares y la configuración del servidor original no forman parte del repositorio.
+The public repository excludes family data, credentials, private history and the original server configuration. Additional [functional reference](docs/FUNCIONALIDAD.md), [scope](docs/ALCANCE.md) and [deployment notes](docs/OPERACION.md) are available in Spanish.

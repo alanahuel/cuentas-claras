@@ -1,5 +1,7 @@
+import type { Invoice } from "./invoices/types";
+interface Draft {key: string; userId: string; payload: Invoice}
 // Only unsubmitted drafts are stored locally, namespaced by authenticated account.
-function database() {
+function database(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open("cuentas-drafts", 1);
     request.onupgradeneeded = () =>
@@ -8,18 +10,18 @@ function database() {
     request.onerror = () => reject(request.error);
   });
 }
-export async function drafts(userId) {
+export async function drafts(userId: string): Promise<Draft[]> {
   const db = await database();
   return new Promise((resolve, reject) => {
     const tx = db.transaction("drafts");
     const req = tx.objectStore("drafts").getAll();
     req.onsuccess = () =>
-      resolve(req.result.filter((x) => x.userId === userId));
+      resolve((req.result as Draft[]).filter((x) => x.userId === userId));
     req.onerror = () => reject(req.error);
     tx.oncomplete = () => db.close();
   });
 }
-export async function saveDraft(userId, payload) {
+export async function saveDraft(userId: string, payload: Invoice): Promise<void> {
   const db = await database();
   return new Promise((resolve, reject) => {
     const tx = db.transaction("drafts", "readwrite");
@@ -35,7 +37,7 @@ export async function saveDraft(userId, payload) {
     tx.onerror = () => reject(tx.error);
   });
 }
-export async function removeDraft(key) {
+export async function removeDraft(key: string): Promise<void> {
   const db = await database();
   return new Promise((resolve, reject) => {
     const tx = db.transaction("drafts", "readwrite");
@@ -47,6 +49,6 @@ export async function removeDraft(key) {
     tx.onerror = () => reject(tx.error);
   });
 }
-export async function clearDrafts(userId) {
+export async function clearDrafts(userId: string): Promise<void> {
   for (const draft of await drafts(userId)) await removeDraft(draft.key);
 }

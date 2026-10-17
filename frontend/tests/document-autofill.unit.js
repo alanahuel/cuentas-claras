@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mergeDocumentSuggestions, documentSuggestions} from '../src/documentAutofill.js';
+import {mergeDocumentSuggestions, documentSuggestions} from '../src/invoices/documentAutofill.ts';
 const reading = {fields:{date:'2026-09-01',number:'F-123',withholding:0,lines:[{base:10000,vat_rate:21}],status:'confirmed'},parties:{expense:{party:'Proveedor',nif:'B12345678'},income:{party:'Cliente',nif:'12345678Z'}}};
 test('manual edits, including deliberately cleared values, survive late OCR',()=>{
   const form={kind:'expense',party:'',number:'Manual',lines:[{base:'42.00',vat_deduct:50}]};

@@ -1,5 +1,10 @@
+import Login from "./auth/Login";
 import ReportSharing from "./ReportSharing";
-import { documentFieldLabels, documentSuggestions, mergeDocumentSuggestions } from "./documentAutofill";
+import InvoiceEditor from "./invoices/InvoiceEditor";
+import { api, scopedUrl, getWorkspaceId, setWorkspaceId } from "./lib/api";
+import { money, decimal, cents } from "./lib/format";
+import { Button, Field, ErrorBox } from "./components/ui";
+import { useSession } from "./auth/useSession";
 import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -12,13 +17,10 @@ import {
   LogOut,
   Plus,
   Upload,
-  Camera,
   Printer,
   FileText,
   Check,
   ArrowRight,
-  X,
-  Trash2,
   Download,
   WifiOff,
   Search,
@@ -37,86 +39,17 @@ import Assistant from "./Assistant";
 import FinancialDashboard from "./FinancialDashboard";
 import InvoiceChecks from "./InvoiceChecks";
 import FiscalHelp, { FiscalReadiness } from "./FiscalHelp";
-import { ClientActivationForm, ClientInvitation } from "./ClientAccess";
+import { ClientInvitation } from "./ClientAccess";
 import Chat, { useChatUnread } from "./Chat";
 import { AdvisorWorkbench, ClientDossier, ServiceRequests } from "./Advisor";
-import { drafts, saveDraft, removeDraft, clearDrafts } from "./offline";
+import { drafts, removeDraft, clearDrafts } from "./offline";
 
-const money = (value) =>
-  new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(
-    (value || 0) / 100,
-  );
-const decimal = (value) => (value / 100).toFixed(2);
-const cents = (value) => {
-  const n = Number(String(value).replace(",", "."));
-  if (!Number.isFinite(n)) throw new Error("Introduce un importe válido.");
-  return Math.round(n * 100);
-};
-const today = () => new Date().toLocaleDateString("sv-SE");
-let csrf = "";
-let workspaceId = "";
-const scopedUrl = (url) =>
-  url +
-  (url.includes("?") ? "&" : "?") +
-  "workspace=" +
-  encodeURIComponent(workspaceId);
-async function api(path, options = {}) {
-  const response = await fetch("/api" + path, {
-    ...options,
-    headers: {
-      ...(options.body instanceof FormData
-        ? {}
-        : { "Content-Type": "application/json" }),
-      "X-CSRF-Token": csrf,
-      "X-Workspace-Id": workspaceId,
-      ...options.headers,
-    },
-  });
-  if (!response.ok) {
-    if (response.status === 401 && path !== "/login") window.dispatchEvent(new Event("session-ended"));
-    let error;
-    try {
-      error = await response.json();
-    } catch {
-      error = { detail: "El servidor no ha respondido. Inténtalo de nuevo." };
-    }
-    const failure = new Error(
-      typeof error.detail === "string"
-        ? error.detail
-        : "Revisa los campos: hay un valor no válido.",
-    );
-    failure.status = response.status;
-    throw failure;
-  }
-  return response.json();
-}
-function Button({ children, icon: Icon, className = "", ...props }) {
-  return (
-    <button className={"button " + className} {...props}>
-      {Icon && <Icon size={18} />} {children}
-    </button>
-  );
-}
-function Field({ label, children, hint }) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      {children}
-      {hint && <small>{hint}</small>}
-    </label>
-  );
-}
-function ErrorBox({ message }) {
-  return message ? (
-    <p className="error" role="alert">
-      {message}
-    </p>
-  ) : null;
-}
 function App() {
-  const [user, setUser] = useState(null),
-    [loading, setLoading] = useState(true),
-    [page, setPage] = useState("home"),
+  const { user, setUser, actor, loading, signIn, signOut, endSession } = useSession({
+    onAuthenticated: () => refreshSpaces(true).catch(e => setError(e.message)),
+    onEnded: () => resetWorkspace(),
+  });
+  const [page, setPage] = useState("home"),
     [invoices, setInvoices] = useState([]),
     [unattached, setUnattached] = useState([]),
     [summary, setSummary] = useState(null),
@@ -131,8 +64,7 @@ function App() {
     [quarter, setQuarter] = useState(
       Math.ceil((new Date().getMonth() + 1) / 3),
     );
-  const [actor, setActor] = useState(null),
-    [spaces, setSpaces] = useState({ clients: [], managers: [], agency: null });
+  const [spaces, setSpaces] = useState({ clients: [], managers: [], agency: null });
   const navigation = useRef(null);
   useEffect(() => {
     const nav = navigation.current;
@@ -172,8 +104,8 @@ function App() {
     }
     setSwitching(true);
     ++loadSequence.current;
-    const previous = workspaceId;
-    workspaceId = id;
+    const previous = getWorkspaceId();
+    setWorkspaceId(id);
     setBusy(true);
     setError("");
     try {
@@ -189,7 +121,7 @@ function App() {
       setUser(next);
       if (record) setEditor(record);
     } catch (e) {
-      workspaceId = previous;
+      setWorkspaceId(previous);
       setError(e.message);
     } finally {
       setSwitching(false);
@@ -214,28 +146,17 @@ function App() {
       if (sequence === loadSequence.current) setError(e.message);
     }
   };
+  const resetWorkspace = () => {
+    ++loadSequence.current;
+    setPage("home"); setQueue([]); setEditor(null); setInvoices([]);
+    setUnattached([]); setSummary(null);
+    setSpaces({clients: [], managers: [], agency: null});
+  };
   useEffect(() => {
-    api("/me")
-      .then((u) => {
-        csrf = u.csrf;
-        workspaceId = "";
-        setActor(u);
-        refreshSpaces(true).catch((e) => setError(e.message));
-        setUser(u);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-    const on = () => setOnline(true),
-      off = () => setOnline(false);
-    const ended = () => { ++loadSequence.current; workspaceId = ""; csrf = ""; setUser(null); setActor(null); setPage("home"); setQueue([]); setEditor(null); setInvoices([]); setUnattached([]); setSummary(null); setSpaces({clients: [], managers: [], agency: null}); };
-    window.addEventListener("session-ended", ended);
+    const on = () => setOnline(true), off = () => setOnline(false);
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
-    return () => {
-      window.removeEventListener("session-ended", ended);
-      window.removeEventListener("online", on);
-      window.removeEventListener("offline", off);
-    };
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
   }, []);
   useEffect(() => {
     let cancelled = false;
@@ -268,18 +189,7 @@ function App() {
     )
       return;
     try {
-      await api("/logout", { method: "POST" });
-      await clearDrafts(user.id);
-      csrf = "";
-      workspaceId = "";
-      setActor(null);
-      setSpaces({ clients: [], managers: [], agency: null });
-      setUser(null);
-      setInvoices([]);
-      setUnattached([]);
-      setSummary(null);
-      setQueue([]);
-      setPage("home");
+      await signOut(user.id);
     } catch (e) {
       setError(e.message);
     }
@@ -321,13 +231,7 @@ function App() {
   if (!user)
     return (
       <Login
-        onLogin={(u) => {
-          csrf = u.csrf;
-          workspaceId = "";
-          setActor(u);
-          refreshSpaces(true).catch((e) => setError(e.message));
-          setUser(u);
-        }}
+        onLogin={signIn}
         online={online}
       />
     );
@@ -685,7 +589,7 @@ function App() {
               <Profile
                 user={user}
                 onSave={(profile) => {
-                  if ((workspaceId || actor?.id) !== user.id) return;
+                  if ((getWorkspaceId() || actor?.id) !== user.id) return;
                   setUser({ ...user, profile });
                   setNotice("Perfil actualizado.");
                 }}
@@ -705,18 +609,7 @@ function App() {
                         "No se han podido borrar los borradores locales. Borra los datos de este sitio en el navegador.",
                       );
                     }
-                    ++loadSequence.current;
-                    csrf = "";
-                    workspaceId = "";
-                    setActor(null);
-                    setSpaces({ clients: [], managers: [], agency: null });
-                    setUser(null);
-                    setInvoices([]);
-                    setUnattached([]);
-                    setSummary(null);
-                    setQueue([]);
-                    setEditor(null);
-                    setPage("home");
+                    endSession();
                     window.alert(
                       result.documents_pending
                         ? "Tu cuenta se ha eliminado. Quedan archivos pendientes de eliminación física; contacta con el administrador. Las copias de seguridad caducan en 14 días."
@@ -736,7 +629,7 @@ function App() {
         </div>
       )}
       {editor && (
-        <Editor
+        <InvoiceEditor
           initial={editor}
           user={user}
           onClose={() => { setEditor(null); if (navigator.onLine) load(); }}
@@ -1032,7 +925,7 @@ function AgencyPanel({ spaces, refresh, onSelect, actor, activeName, onDeactivat
                   <li key={c.id}>
                     <div>
                       <strong>{c.name}</strong>
-                      {workspaceId === c.id && <span className="agency-current">Espacio activo</span>}
+                      {getWorkspaceId() === c.id && <span className="agency-current">Espacio activo</span>}
                       <p>
                         {!c.can_manage ? `Asignado por ${c.agency_name}` : c.managed
                           ? (c.has_login ? "Cuenta de cliente activa" : "Acceso pendiente de activar")
@@ -1062,7 +955,7 @@ function AgencyPanel({ spaces, refresh, onSelect, actor, activeName, onDeactivat
                               method: "PUT",
                               body: JSON.stringify({ archived: !c.archived }),
                             });
-                            if (!c.archived && workspaceId === c.id)
+                            if (!c.archived && getWorkspaceId() === c.id)
                               await onSelect("", "agency", "Cliente archivado. Sus documentos se conservan.");
                             setNotice(
                               c.archived
@@ -1084,7 +977,7 @@ function AgencyPanel({ spaces, refresh, onSelect, actor, activeName, onDeactivat
                       run(async () => {
                         await api(`/agency/clients/${c.id}`, {method: "PUT", body: JSON.stringify({name: editedName.trim(), archived: !!c.archived})});
                         setEditingClient(null);
-                        if (workspaceId === c.id) await onSelect(c.id, "agency", "Nombre del cliente actualizado.");
+                        if (getWorkspaceId() === c.id) await onSelect(c.id, "agency", "Nombre del cliente actualizado.");
                         setNotice("Nombre del cliente actualizado.");
                       });
                     }}>
@@ -1328,7 +1221,7 @@ function TeamPanel({ spaces, refresh, onSelect, actor }) {
         <Button disabled={busy}>Comprobar invitación de equipo</Button>
       </form>
       {preview && <div className="team-join-preview"><h3>{preview.name}</h3><p>Entrarás como gestor. Solo podrás trabajar con los clientes que te asignen. Unirte no comparte tus propias facturas con la gestoría.</p><Button disabled={busy} className="primary" onClick={() => run(async () => {await api("/team/join", {method:"POST", body:JSON.stringify({code,accept:true})}); setCode(""); setPreview(null); setNotice("Te has unido al equipo. La gestoría ya puede asignarte clientes.");})}>Aceptar y unirme al equipo</Button></div>}
-      <ul className="team-members">{(spaces.memberships || []).map((membership) => <li key={membership.id}><div className="team-member-heading"><div><strong>{membership.name}</strong><p>{membership.enabled ? "Gestor · acceso a clientes asignados" : "Gestoría desactivada · acceso suspendido"}</p></div><Button disabled={busy} aria-label={`Salir de ${membership.name}`} onClick={() => {if(window.confirm(`¿Salir de ${membership.name}? Perderás el acceso a sus clientes asignados.`)) run(async () => {await api(`/team/memberships/${membership.id}`, {method:"DELETE"}); if(workspaceId) await onSelect("", "agency", "Has salido del equipo y vuelto a tu actividad."); setNotice("Has salido del equipo. Tus datos personales se conservan.");});}}>Salir del equipo</Button></div></li>)}</ul>
+      <ul className="team-members">{(spaces.memberships || []).map((membership) => <li key={membership.id}><div className="team-member-heading"><div><strong>{membership.name}</strong><p>{membership.enabled ? "Gestor · acceso a clientes asignados" : "Gestoría desactivada · acceso suspendido"}</p></div><Button disabled={busy} aria-label={`Salir de ${membership.name}`} onClick={() => {if(window.confirm(`¿Salir de ${membership.name}? Perderás el acceso a sus clientes asignados.`)) run(async () => {await api(`/team/memberships/${membership.id}`, {method:"DELETE"}); if(getWorkspaceId()) await onSelect("", "agency", "Has salido del equipo y vuelto a tu actividad."); setNotice("Has salido del equipo. Tus datos personales se conservan.");});}}>Salir del equipo</Button></div></li>)}</ul>
     </section>
   </div>;
 }
@@ -1520,184 +1413,7 @@ function SavingsTracker({ summary, year, quarter, reload, online }) {
   );
 }
 
-function Login({ onLogin, online }) {
-  const initialClientCode = new URLSearchParams(window.location.hash.slice(1)).get("activar-cliente") || "";
-  const [activatingClient, setActivatingClient] = useState(!!initialClientCode);
-  const [accountType, setAccountType] = useState("personal");
-  const [registering, setRegistering] = useState(
-      new URLSearchParams(window.location.search).get("registro") === "1",
-    ),
-    [name, setName] = useState(""),
-    [confirmation, setConfirmation] = useState("");
-  const [email, setEmail] = useState(""),
-    [password, setPassword] = useState(""),
-    [error, setError] = useState(""),
-    [busy, setBusy] = useState(false);
-  const submit = async (e) => {
-    e.preventDefault();
-    if (registering && password !== confirmation) {
-      setError("Las contraseñas no coinciden.");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      onLogin(
-        await api(registering ? "/register" : "/login", {
-          method: "POST",
-          body: JSON.stringify(
-            registering
-              ? { name, email, password, account_type: accountType }
-              : { email, password },
-          ),
-        }),
-      );
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  if (activatingClient) return <ClientActivationForm api={api} onLogin={onLogin} initialCode={initialClientCode} onCancel={() => { history.replaceState(null,"",location.pathname); setActivatingClient(false); }} />;
-  return (
-    <main className="login">
-      <section className="login-story">
-        <div className="brand">
-          <img src="/icon.svg" alt="" />
-          Cuentas
-        </div>
-        <div>
-          <h1>
-            Menos papeles.
-            <br />
-            Más claridad.
-          </h1>
-          <p>
-            Facturas, gastos y tu trimestre en un mismo lugar. Un espacio propio
-            para llevar tu actividad al día.
-          </p>
-          <div className="login-rule" />
-          <span>Tu actividad. Tus documentos. Tu servidor.</span>
-        </div>
-        <small>Gestión para autónomos · Salamanca</small>
-      </section>
-      <section className="login-form">
-        <form onSubmit={submit}>
-          <h2>{registering ? "Crea tu cuenta" : "Entra en tus cuentas"}</h2>
-          <p>
-            {registering
-              ? "Empieza con un espacio propio para tus facturas y gastos."
-              : "Accede a tu espacio personal."}
-          </p>
-          {registering && (
-            <Field label="Tu nombre">
-              <input
-                required
-                minLength="2"
-                maxLength="100"
-                autoComplete="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </Field>
-          )}
-          {registering && (
-            <Field label="Tipo de cuenta">
-              <select
-                value={accountType}
-                onChange={(e) => setAccountType(e.target.value)}
-              >
-                <option value="personal">Autónomo · mi actividad</option>
-                <option value="agency">Gestoría · varios clientes</option>
-              </select>
-            </Field>
-          )}
-          <Field label="Correo electrónico">
-            <input
-              type="email"
-              autoComplete="username"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </Field>
-          <Field label="Contraseña">
-            <input
-              type="password"
-              autoComplete={registering ? "new-password" : "current-password"}
-              minLength={registering ? 12 : undefined}
-              maxLength="256"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </Field>
-          {registering && (
-            <>
-              <small className="password-hint">
-                Usa una contraseña de al menos 12 caracteres.
-              </small>
-              <Field label="Repite la contraseña">
-                <input
-                  required
-                  type="password"
-                  autoComplete="new-password"
-                  value={confirmation}
-                  onChange={(e) => setConfirmation(e.target.value)}
-                />
-              </Field>
-            </>
-          )}
-          <ErrorBox message={error} />
-          {!online && (
-            <p className="banner">Necesitas conexión para iniciar sesión.</p>
-          )}
-          <Button
-            className="primary"
-            disabled={busy || !online}
-            icon={busy ? LoaderCircle : ArrowRight}
-          >
-            {busy
-              ? registering
-                ? "Creando cuenta…"
-                : "Entrando…"
-              : registering
-                ? "Crear cuenta"
-                : "Entrar"}
-          </Button>
-          <div className="auth-switch">
-            <span>
-              {registering ? "¿Ya tienes cuenta?" : "¿Aún no tienes cuenta?"}
-            </span>
-            <button
-              type="button"
-              className={
-                registering ? "text-button" : "button secondary register-button"
-              }
-              disabled={busy}
-              onClick={() => {
-                setRegistering(!registering);
-                setError("");
-                setPassword("");
-                setConfirmation("");
-              }}
-            >
-              {registering ? "Iniciar sesión" : "Crear una cuenta"}
-            </button>
-          </div>
-          <button className="text-button" type="button" onClick={() => setActivatingClient(true)}>Activar acceso de cliente</button>
-          <p className="login-help">
-            {registering
-              ? "Tus registros estarán separados de los de otras cuentas. El correo se utiliza para identificar tu acceso; no se envía un mensaje de verificación."
-              : "Si necesitas recuperar el acceso, contacta con el administrador del servidor."}
-          </p>
-        </form>
-      </section>
-    </main>
-  );
-}
 const reviewLabels = { submitted: "Enviada a gestoría", changes_requested: "Cambios solicitados", approved: "Aprobada por gestoría" };
-const reviewActions = { submitted: "Enviado a gestoría", changes_requested: "Cambios solicitados", approved: "Aprobado y contabilizado", edited: "Datos modificados", corrected_from_original: "Discrepancias corregidas desde el original" };
 function ReviewQueue({ items, onEdit, onNew, onInvoices }) {
   const [filter, setFilter] = useState("all");
   const shown = items.filter((i) => filter === "all" || (i.review_state || "draft") === filter);
@@ -1857,7 +1573,7 @@ function InvoiceList({ items, onEdit, onNew, year, quarter }) {
   );
   return (
     <section>
-      <ReportSharing key={`${workspaceId}-${year}-${quarter}`} api={api} scopedUrl={scopedUrl} year={year} quarter={quarter} />
+      <ReportSharing key={`${getWorkspaceId()}-${year}-${quarter}`} api={api} scopedUrl={scopedUrl} year={year} quarter={quarter} />
       <QuarterPacket year={year} quarter={quarter} />
       <div className="list-tools">
         <div className="tabs" aria-label="Filtrar documentos">
@@ -2388,863 +2104,6 @@ function Tax({ summary: s, user, year, quarter, reload, onSettings }) {
         </a>
       </details>
     </>
-  );
-}
-function Editor({ initial, user, onClose, onSave }) {
-  const dialog = useRef(null),
-    fileInput = useRef(null),
-    cameraInput = useRef(null);
-  const [form, setForm] = useState({
-    kind: initial.kind || "expense",
-    status: initial.status || "draft",
-    date: initial.date || today(),
-    number: initial.number || "",
-    party: initial.party || "",
-    nif: initial.nif || "",
-    category: initial.category || "Otros",
-    withholding: decimal(initial.withholding || 0),
-    note: initial.note || "",
-    document_id: initial.document_id || null,
-    request_id: initial.request_id || crypto.randomUUID(),
-    version: initial.version || 1,
-    lines: (
-      initial.lines || [
-        {
-          base: 0,
-          vat_rate: 21,
-          irpf_deduct: 100,
-          vat_deduct: 100,
-          description: "",
-        },
-      ]
-    ).map((l) => ({ ...l, base: decimal(l.base) })),
-  });
-  const protectedFields = useRef(new Set(
-    Object.keys(documentFieldLabels).filter(key => initial[key] !== undefined && initial[key] !== ""),
-  ));
-  const [aiConfig, setAiConfig] = useState(null);
-  const [analysisNotice, setAnalysisNotice] = useState("");
-  useEffect(() => {
-    if (navigator.onLine) api("/document-analysis").then(setAiConfig).catch(() => {});
-  }, []);
-  const applyReading = (result) => {
-    setDocument(previous => ({ ...previous, ...result }));
-    setForm(current => ({
-      ...mergeDocumentSuggestions(current, result, protectedFields.current),
-      document_id: result.id,
-    }));
-    setDirty(true);
-    setChecked(false);
-    setAnalysisNotice(result.ai_error ? "Lectura local disponible. La lectura automática con IA no se ha completado." : "Lectura terminada. Se han rellenado los datos reconocidos y conservado tus cambios manuales.");
-  };
-  const [document, setDocument] = useState(null),
-    [preview, setPreview] = useState(null),
-    [error, setError] = useState(""),
-    [busy, setBusy] = useState(false),
-    [checked, setChecked] = useState(false),
-    [dirty, setDirty] = useState(false);
-  const [policy, setPolicy] = useState(null);
-  const [reviewHistory, setReviewHistory] = useState([]);
-  const [reviewComment, setReviewComment] = useState("");
-  const [returnOpen, setReturnOpen] = useState(false);
-  const sendToAgency = policy?.required && !policy?.can_approve;
-  useEffect(() => {
-    if (!navigator.onLine) return;
-    let cancelled = false;
-    Promise.all([api("/review-policy"), initial.id ? api(`/invoices/${initial.id}/reviews`) : Promise.resolve([])])
-      .then(([nextPolicy, history]) => { if (!cancelled) { setPolicy(nextPolicy); setReviewHistory(history); } })
-      .catch((e) => { if (!cancelled) setError(e.message); });
-    return () => { cancelled = true; };
-  }, []);
-  const returnForChanges = async () => {
-    setError("");
-    setBusy(true);
-    try {
-      await api(`/invoices/${initial.id}/request-changes`, {method: "POST", body: JSON.stringify({version: form.version, comment: reviewComment.trim()})});
-      await onSave("Cambios solicitados. El cliente verá el comentario al abrir su cuenta.");
-    } catch (e) { setError(e.message); } finally { setBusy(false); }
-  };
-  const [templates, setTemplates] = useState([]),
-    [selectedTemplate, setSelectedTemplate] = useState(""),
-    [templateName, setTemplateName] = useState(""),
-    [templateNotice, setTemplateNotice] = useState("");
-  useEffect(() => {
-    api("/templates")
-      .then(setTemplates)
-      .catch((e) => setError(e.message));
-  }, []);
-  const applyTemplate = (id) => {
-    setSelectedTemplate(id);
-    setTemplateNotice("");
-    const item = templates.find((t) => t.id === id);
-    if (!item) {
-      setTemplateName("");
-      return;
-    }
-    setTemplateName(item.label);
-    for (const key of ["party", "nif", ...(item.kind === "expense" ? ["lines", "withholding"] : [])]) protectedFields.current.add(key);
-    setForm((f) => ({
-      ...f,
-      party: item.party,
-      nif: item.nif,
-      ...(item.kind === "expense"
-        ? {
-            category: item.category,
-            lines: item.lines.map((l) => ({ ...l, base: decimal(l.base) })),
-            withholding: decimal(item.withholding),
-            note: item.note,
-          }
-        : {}),
-    }));
-    setChecked(false);
-    setDirty(true);
-    setTemplateNotice(
-      "Datos habituales rellenados. Comprueba el importe, la fecha y el número de esta factura.",
-    );
-  };
-  const saveTemplate = async () => {
-    setBusy(true);
-    setError("");
-    setTemplateNotice("");
-    try {
-      if (!templateName.trim() || !form.party.trim())
-        throw new Error(
-          "Indica un nombre para guardar y el cliente o proveedor.",
-        );
-      const expense = form.kind === "expense";
-      const body = {
-        kind: expense ? "expense" : "client",
-        label: templateName.trim(),
-        party: form.party,
-        nif: form.nif,
-        ...(expense
-          ? {
-              category: form.category,
-              lines: form.lines.map((l) => ({ ...l, base: cents(l.base) })),
-              withholding: cents(form.withholding),
-              note: form.note,
-            }
-          : {}),
-      };
-      const saved = await api(
-        "/templates" + (selectedTemplate ? "/" + selectedTemplate : ""),
-        {
-          method: selectedTemplate ? "PUT" : "POST",
-          body: JSON.stringify(body),
-        },
-      );
-      setTemplates(await api("/templates"));
-      setSelectedTemplate(saved.id);
-      setTemplateNotice(
-        expense
-          ? "Gasto recurrente guardado para próximas facturas."
-          : "Cliente guardado para próximos ingresos.",
-      );
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const removeTemplate = async () => {
-    if (
-      !window.confirm(
-        "¿Eliminar estos datos guardados? Los registros anteriores se conservan.",
-      )
-    )
-      return;
-    setBusy(true);
-    setError("");
-    try {
-      await api("/templates/" + selectedTemplate, { method: "DELETE" });
-      setTemplates(await api("/templates"));
-      setSelectedTemplate("");
-      setTemplateName("");
-      setTemplateNotice("Datos guardados eliminados.");
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const change = (key, value) => {
-    protectedFields.current.add(key);
-    setForm((f) => ({ ...f, [key]: value }));
-    setDirty(true);
-    setChecked(false);
-  };
-  const close = () => {
-    if (
-      !dirty ||
-      window.confirm("Tienes cambios sin guardar. ¿Cerrar la revisión?")
-    )
-      onClose();
-  };
-  useEffect(() => {
-    dialog.current.showModal();
-    return () => {
-      dialog.current?.close();
-    };
-  }, []);
-  useEffect(
-    () => () => {
-      if (preview) URL.revokeObjectURL(preview);
-    },
-    [preview],
-  );
-  useEffect(() => {
-    if (!initial.document_id) return;
-    setBusy(true);
-    setAnalysisNotice("Leyendo el documento con IA…");
-    api("/documents/" + initial.document_id + "/prepare?kind=" + form.kind, {method: "POST"})
-      .then(applyReading)
-      .catch((e) => setError(e.message))
-      .finally(() => setBusy(false));
-  }, []);
-  const readWithAI = async () => {
-    setBusy(true);
-    setError("");
-    setAnalysisNotice("Leyendo el documento con IA…");
-    try {
-      applyReading(await api(`/documents/${form.document_id}/ai-extraction?kind=${form.kind}`, {method: "POST"}));
-    } catch (e) {
-      setError(e.message);
-      setAnalysisNotice("No se ha completado la lectura con IA. Tus datos se conservan.");
-    } finally {
-      setBusy(false);
-    }
-  };
-  useEffect(() => {
-    if (initial.document_id)
-      fetch(scopedUrl("/api/documents/" + initial.document_id))
-        .then((r) => {
-          if (!r.ok) throw new Error("No se pudo abrir el documento.");
-          return r.blob();
-        })
-        .then((blob) => {
-          setPreview(URL.createObjectURL(blob));
-          setDocument((d) => ({ ...d, mime: blob.type }));
-        })
-        .catch((e) => setError(e.message));
-  }, []);
-  const upload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setError("");
-    if (file.size > 12 * 1024 * 1024) {
-      setError("El archivo supera 12 MB.");
-      return;
-    }
-    setBusy(true);
-    setAnalysisNotice("Leyendo el documento con IA…");
-    try {
-      const body = new FormData();
-      body.append("file", file);
-      const result = await api("/documents?kind=" + form.kind, { method: "POST", body });
-      applyReading(result);
-      setPreview(URL.createObjectURL(file));
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-      e.target.value = "";
-    }
-  };
-  const lineChange = (index, key, value) =>
-    change(
-      "lines",
-      form.lines.map((l, i) => (i === index ? { ...l, [key]: value } : l)),
-    );
-  const totals = form.lines.reduce(
-    (t, l) => {
-      const base = Number(l.base || 0) * 100;
-      return {
-        base: t.base + base,
-        vat: t.vat + Math.round((base * l.vat_rate) / 100),
-      };
-    },
-    { base: 0, vat: 0 },
-  );
-  const save = async (status) => {
-    setError("");
-    setBusy(true);
-    try {
-      const payload = {
-        ...form,
-        status: status === "submit" ? "draft" : status,
-        review_action: status === "submit" ? "submit" : "save",
-        withholding: cents(form.withholding),
-        lines: form.lines.map((l) => ({ ...l, base: cents(l.base) })),
-      };
-      if (status === "confirmed" && !checked)
-        throw new Error(
-          "Comprueba los datos y marca la confirmación de revisión.",
-        );
-      if (!navigator.onLine) {
-        if (user.delegated)
-          throw new Error(
-            "Para trabajar en una cuenta de cliente necesitas conexión.",
-          );
-        if (initial.id || payload.document_id)
-          throw new Error(
-            "Para editar registros o guardar documentos cargados necesitas conexión.",
-          );
-        await saveDraft(user.id, { ...payload, status: "draft" });
-        await onSave(
-          "Borrador guardado en este dispositivo. Sincronízalo al recuperar la conexión.",
-        );
-        return;
-      }
-      await api("/invoices" + (initial.id ? "/" + initial.id : ""), {
-        method: initial.id ? "PUT" : "POST",
-        body: JSON.stringify(payload),
-      });
-      await onSave(
-        status === "submit"
-          ? "Documento enviado a gestoría. Pendiente de aprobación."
-          : status === "confirmed"
-          ? user.delegated ? `Documento aprobado en el expediente de ${user.name}.` : "Documento revisado. Tus cuentas están actualizadas."
-          : "Borrador guardado. Puedes revisarlo más tarde.",
-      );
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const remove = async () => {
-    if (
-      !window.confirm(
-        "¿Eliminar este registro guardado? Se retirará de los cálculos fiscales y se perderán los cambios sin guardar. El documento original se conserva.",
-      )
-    )
-      return;
-    setBusy(true);
-    try {
-      await api(`/invoices/${initial.id}?version=${initial.version}`, { method: "DELETE" });
-      await onSave("Registro eliminado. Los cálculos se han actualizado.");
-    } catch (e) {
-      setError(e.message);
-      setBusy(false);
-    }
-  };
-  return (
-    <dialog
-      ref={dialog}
-      className="editor"
-      onCancel={(e) => {
-        e.preventDefault();
-        close();
-      }}
-      aria-labelledby="editor-title"
-    >
-      <header className="editor-header">
-        <div>
-          <h2 id="editor-title">
-            {initial.id ? "Revisar documento" : "Añadir un documento"}
-            {user.delegated ? ` · ${user.name}` : ""}
-          </h2>
-          <p>
-            {form.document_id
-              ? "Comprueba el original y completa los datos."
-              : "Sube tu factura o introduce los datos manualmente."}
-          </p>
-        </div>
-        <button
-          className="icon-button"
-          aria-label="Cerrar revisión"
-          disabled={busy}
-          onClick={close}
-        >
-          <X />
-        </button>
-      </header>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          save(sendToAgency ? "submit" : "confirmed");
-        }}
-      >
-        <div className="editor-columns">
-          <aside className="document-panel">
-            <input
-              ref={cameraInput}
-              className="sr-only"
-              aria-label="Capturar foto de factura"
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={upload}
-              disabled={busy || !!form.document_id}
-            />
-            {!form.document_id && (
-              <Button
-                type="button"
-                icon={Camera}
-                className="primary camera-button"
-                disabled={busy || !navigator.onLine}
-                onClick={() => cameraInput.current.click()}
-              >
-                Hacer foto
-              </Button>
-            )}
-            <input
-              ref={fileInput}
-              className="sr-only"
-              type="file"
-              accept="application/pdf,image/jpeg,image/png,image/webp"
-              onChange={upload}
-              disabled={busy || !!form.document_id}
-            />
-            {preview ? (
-              <>
-                <div className="preview-title">
-                  <FileText size={17} />
-                  <strong>{document?.name || "Documento original"}</strong>
-                </div>
-                {document?.mime === "application/pdf" ? (
-                  <iframe title="Factura original" src={preview} />
-                ) : (
-                  <img
-                    className="document-image"
-                    src={preview}
-                    alt="Factura original para revisar"
-                  />
-                )}
-              </>
-            ) : (
-              <button
-                type="button"
-                className="upload-zone"
-                disabled={busy || !navigator.onLine}
-                onClick={() => fileInput.current.click()}
-              >
-                <Upload size={32} />
-                <strong>
-                  {busy ? "Leyendo el documento…" : "Selecciona una factura"}
-                </strong>
-                <span>Foto o PDF · hasta 12 MB · 8 páginas</span>
-                <small>Se leerá automáticamente con OpenAI para rellenar los datos.</small>
-              </button>
-            )}
-            {busy && (
-              <p className="working" role="status">
-                <LoaderCircle size={18} className="spin" /> Procesando…
-              </p>
-            )}
-            {form.document_id && <div className="ai-reading">
-              <p>Lectura automática con IA. El documento se envía a OpenAI; comprueba los datos antes de guardar.</p>
-              {document?.ai_error && <Button type="button" disabled={busy || !navigator.onLine || !aiConfig?.available} onClick={readWithAI}>Reintentar lectura con IA</Button>}
-            </div>}
-            {document?.classification && <div className="document-classification" role="status">
-              <strong>{{invoice: "Factura", receipt: "Recibo", other: "Otro documento", unknown: "Documento sin identificar"}[document.classification.document_type]}</strong>
-              <span>País del emisor: {document.classification.issuer_country ? new Intl.DisplayNames(['es'], {type: 'region'}).of(document.classification.issuer_country) : "No identificado"}</span>
-              <p>{document.classification.evidence}</p>
-            </div>}
-            {document?.fields?.detected_total !== undefined && (
-              <p className="banner" role="status">
-                Total del documento: {money(document.fields.detected_total)}.{" "}
-                {Math.abs(totals.base + totals.vat - cents(form.withholding || "0") - document.fields.detected_total) <= 2
-                  ? "Coincide con el formulario."
-                  : `Diferencia con el formulario: ${money(totals.base + totals.vat - cents(form.withholding || "0") - document.fields.detected_total)}. Revisa los importes.`}
-              </p>
-            )}
-            {!!document?.warnings?.length && (
-              <div className="banner"><strong>Revisa estos datos</strong><ul>{document.warnings.map((warning, i) => <li key={i}>{warning}</li>)}</ul></div>
-            )}
-            {document?.warning && <p className="banner">{document.warning}</p>}
-            {document?.text && (
-              <details className="ocr-text">
-                <summary>Texto de la lectura local · revisar</summary>
-                <pre>{document.text}</pre>
-              </details>
-            )}
-            <p className="document-note">
-              La lectura automática propone los campos que reconoce. Comprueba
-              importes, tipos de IVA, deducibilidad y el papel de cada tercero
-              en el original.
-            </p>
-          </aside>
-          <div className="document-form">
-            <fieldset className="kind-picker">
-              <legend>Tipo de registro</legend>
-              {[
-                ["expense", "Gasto"],
-                ["income", "Ingreso"],
-              ].map(([value, label]) => (
-                <label key={value}>
-                  <input
-                    type="radio"
-                    name="kind"
-                    value={value}
-                    checked={form.kind === value}
-                    disabled={busy}
-                    onChange={() => {
-                      setForm(current => {
-                        const next = {...current, kind: value};
-                        if (document?.parties) {
-                          for (const key of ["party", "nif"]) {
-                            if (!protectedFields.current.has(key)) next[key] = document.parties[value]?.[key] || "";
-                          }
-                        }
-                        return next;
-                      });
-                      setDirty(true);
-                      setChecked(false);
-                      setSelectedTemplate("");
-                      setTemplateName("");
-                      setTemplateNotice("");
-                    }}
-                  />
-                  {label}
-                </label>
-              ))}
-            </fieldset>
-            <div className="analysis-status" role="status" aria-live="polite">{analysisNotice}</div>
-            {document?.fields && ["date", "number", "party", "nif", "lines"].some(key => documentSuggestions(document, form.kind)[key] === undefined) && (
-              <p className="document-missing">No se ha podido leer: {["date", "number", "party", "nif", "lines"].filter(key => documentSuggestions(document, form.kind)[key] === undefined).map(key => documentFieldLabels[key]).join(", ")}. Comprueba estos campos en el original.</p>
-            )}
-            {document?.fields && (
-              <details className="extraction-review">
-                <summary>Datos detectados · {document.engine}</summary>
-                <p>Los campos que has editado se conservan. Puedes aplicar una propuesta concreta aquí.</p>
-                <dl>
-                  {Object.entries(documentSuggestions(document, form.kind)).map(([key, value]) => (
-                    <div key={key}>
-                      <dt>{documentFieldLabels[key]}</dt>
-                      <dd>
-                        <span>{key === "lines" ? value.map(line => `${money(cents(line.base))} · IVA ${line.vat_rate}%`).join(" / ") : key === "withholding" ? money(cents(value)) : value}</span>
-                        {document.evidence?.[key]?.method === "calculated" && <small>Calculado a partir del porcentaje leído.</small>}
-                        <Button type="button" disabled={busy} onClick={() => change(key, value)} aria-label={`Aplicar propuesta: ${documentFieldLabels[key]}`}>Aplicar</Button>
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-                {Object.keys(documentSuggestions(document, form.kind)).length === 0 && <p>No se han reconocido campos. Prueba la lectura con IA o completa los datos manualmente.</p>}
-                <p>Comprueba también los porcentajes de deducibilidad antes de confirmar.</p>
-              </details>
-            )}
-            <details className="recurring-tools">
-              <summary>
-                {form.kind === "expense"
-                  ? "Gastos recurrentes y suscripciones"
-                  : "Clientes guardados"}
-              </summary>
-              <Field
-                label={
-                  form.kind === "expense"
-                    ? "Rellenar desde un gasto recurrente"
-                    : "Rellenar desde un cliente"
-                }
-              >
-                <select
-                  value={selectedTemplate}
-                  onChange={(e) => applyTemplate(e.target.value)}
-                  disabled={busy}
-                >
-                  <option value="">Selecciona o guarda uno nuevo</option>
-                  {templates
-                    .filter(
-                      (t) =>
-                        t.kind ===
-                        (form.kind === "expense" ? "expense" : "client"),
-                    )
-                    .map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.label}
-                      </option>
-                    ))}
-                </select>
-              </Field>
-              <p>
-                {form.kind === "expense"
-                  ? "Guarda proveedor, conceptos, importes y notas habituales. Cada uso requiere revisar y registrar la nueva factura."
-                  : "Guarda nombre y NIF para rellenarlos en tus próximos ingresos."}
-              </p>
-              <Field label="Nombre para guardar">
-                <input
-                  value={templateName}
-                  maxLength={100}
-                  onChange={(e) => setTemplateName(e.target.value)}
-                  placeholder={
-                    form.kind === "expense"
-                      ? "Por ejemplo, suscripción mensual"
-                      : "Por ejemplo, cliente habitual"
-                  }
-                />
-              </Field>
-              <div className="packet-actions">
-                <Button
-                  type="button"
-                  disabled={busy || !navigator.onLine}
-                  onClick={saveTemplate}
-                >
-                  {selectedTemplate
-                    ? "Actualizar datos guardados"
-                    : form.kind === "expense"
-                      ? "Guardar gasto recurrente"
-                      : "Guardar cliente"}
-                </Button>
-                {selectedTemplate && (
-                  <Button
-                    type="button"
-                    disabled={busy}
-                    onClick={removeTemplate}
-                  >
-                    Eliminar datos guardados
-                  </Button>
-                )}
-              </div>
-              {templateNotice && <p role="status">{templateNotice}</p>}
-            </details>
-            <div className="form-grid">
-              <Field label="Número de factura">
-                <input
-                  required
-                  maxLength="100"
-                  value={form.number}
-                  onChange={(e) => change("number", e.target.value)}
-                />
-              </Field>
-              <Field label="Fecha">
-                <input
-                  required
-                  type="date"
-                  value={form.date}
-                  onChange={(e) => change("date", e.target.value)}
-                />
-              </Field>
-              <Field label={form.kind === "expense" ? "Proveedor" : "Cliente"}>
-                <input
-                  required
-                  maxLength="200"
-                  value={form.party}
-                  onChange={(e) => change("party", e.target.value)}
-                />
-              </Field>
-              <Field label="NIF del tercero">
-                <input
-                  required
-                  maxLength="30"
-                  value={form.nif}
-                  onChange={(e) => change("nif", e.target.value)}
-                />
-              </Field>
-            </div>
-            <Field label="Categoría">
-              <select
-                value={form.category}
-                onChange={(e) => change("category", e.target.value)}
-              >
-                {[
-                  "Otros",
-                  "Servicios profesionales",
-                  "Material",
-                  "Software",
-                  "Suministros",
-                  "Transporte",
-                  "Cuotas",
-                  "Alquiler",
-                ].map((x) => (
-                  <option key={x}>{x}</option>
-                ))}
-              </select>
-            </Field>
-            <div className="section-label">
-              <h3>Desglose de importes</h3>
-              <button
-                type="button"
-                className="text-button"
-                onClick={() =>
-                  change("lines", [
-                    ...form.lines,
-                    {
-                      description: "",
-                      base: "0.00",
-                      vat_rate: 21,
-                      irpf_deduct: 100,
-                      vat_deduct: 100,
-                    },
-                  ])
-                }
-              >
-                <Plus size={16} /> Añadir base
-              </button>
-            </div>
-            {form.lines.map((line, index) => (
-              <fieldset className="invoice-line" key={index}>
-                <legend>Base {index + 1}</legend>
-                <Field label={`Concepto de la base ${index + 1}`}>
-                  <input
-                    maxLength={300}
-                    value={line.description || ""}
-                    onChange={(e) =>
-                      lineChange(index, "description", e.target.value)
-                    }
-                    placeholder="Por ejemplo, suscripción de software"
-                  />
-                </Field>
-                <div className="form-grid">
-                  <Field label="Base imponible (€)">
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
-                      value={line.base}
-                      onChange={(e) =>
-                        lineChange(index, "base", e.target.value)
-                      }
-                    />
-                  </Field>
-                  <Field label="Tipo de IVA">
-                    <select
-                      value={line.vat_rate}
-                      onChange={(e) =>
-                        lineChange(index, "vat_rate", Number(e.target.value))
-                      }
-                    >
-                      {[0, 4, 10, 21].map((rate) => (
-                        <option value={rate} key={rate}>
-                          {rate} %
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  {form.kind === "expense" && (
-                    <>
-                      <Field label="Deducible IRPF (%)">
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          required
-                          value={line.irpf_deduct}
-                          onChange={(e) =>
-                            lineChange(
-                              index,
-                              "irpf_deduct",
-                              Number(e.target.value),
-                            )
-                          }
-                        />
-                      </Field>
-                      <Field label="Deducible IVA (%)">
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          required
-                          value={line.vat_deduct}
-                          onChange={(e) =>
-                            lineChange(
-                              index,
-                              "vat_deduct",
-                              Number(e.target.value),
-                            )
-                          }
-                        />
-                      </Field>
-                    </>
-                  )}
-                </div>
-                {form.lines.length > 1 && (
-                  <button
-                    type="button"
-                    className="text-button danger"
-                    onClick={() =>
-                      change(
-                        "lines",
-                        form.lines.filter((_, i) => i !== index),
-                      )
-                    }
-                  >
-                    <Trash2 size={15} /> Quitar esta base
-                  </button>
-                )}
-              </fieldset>
-            ))}
-            <Field
-              label="Retención IRPF (€)"
-              hint={
-                form.kind === "expense"
-                  ? "Retención practicada al proveedor; no se resta de tu Modelo 130."
-                  : "Retención soportada en este ingreso."
-              }
-            >
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                required
-                value={form.withholding}
-                onChange={(e) => change("withholding", e.target.value)}
-              />
-            </Field>
-            <dl className="invoice-total">
-              <div>
-                <dt>Base + IVA − retención</dt>
-                <dd>
-                  {money(
-                    totals.base +
-                      totals.vat -
-                      Number(form.withholding || 0) * 100,
-                  )}
-                </dd>
-              </div>
-            </dl>
-            <Field label="Notas">
-              <textarea
-                rows="2"
-                maxLength="2000"
-                value={form.note}
-                onChange={(e) => change("note", e.target.value)}
-              />
-            </Field>
-            <section className="document-review" aria-label="Revisión de gestoría">
-              {sendToAgency && <p>Tu gestoría debe aprobar este documento antes de contabilizarlo. Puedes guardar un borrador o enviarlo a revisión.</p>}
-              {initial.review_state === "changes_requested" && <div className="review-feedback"><h3>Cambios solicitados</h3><p>{initial.review_note}</p></div>}
-              {initial.status === "confirmed" && <p>Guardar como borrador retira este registro de los cálculos. Los cambios necesitarán una nueva revisión.</p>}
-              {reviewHistory.length > 0 && <details className="review-history"><summary>Historial de revisión ({reviewHistory.length})</summary><ol>{reviewHistory.map((entry, index) => <li key={index}><strong>{reviewActions[entry.action] || entry.action}</strong><small>{entry.actor_name} · {new Date(entry.at * 1000).toLocaleString("es-ES")} · Versión {entry.version}</small>{entry.comment && <p>{entry.comment}</p>}</li>)}</ol></details>}
-              {policy?.can_approve && initial.review_state === "submitted" && <div className="request-changes">
-                <Button type="button" disabled={busy} onClick={() => setReturnOpen(!returnOpen)} aria-expanded={returnOpen}>Pedir cambios al cliente</Button>
-                {returnOpen && <div><Field label="Qué debe corregir el cliente"><textarea rows="3" maxLength={2000} value={reviewComment} onChange={(e) => setReviewComment(e.target.value)} /></Field>{dirty && <p>Hay cambios sin guardar. Guarda el documento como borrador o cierra y vuelve a abrir la revisión para devolver la versión original.</p>}<Button type="button" disabled={busy || dirty || !reviewComment.trim()} onClick={returnForChanges}>Enviar solicitud de cambios</Button></div>}
-              </div>}
-            </section>
-            {!sendToAgency && <label className="review-check">
-              <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
-              He comprobado el original, los importes y su deducibilidad.
-            </label>}
-            <ErrorBox message={error} />
-          </div>
-        </div>
-        <footer className="editor-footer">
-          {initial.id && (
-            <Button
-              type="button"
-              className="danger"
-              disabled={busy}
-              icon={Trash2}
-              onClick={remove}
-            >
-              {initial.status === "draft" ? "Eliminar borrador" : initial.kind === "expense" ? "Eliminar gasto" : "Eliminar factura"}
-            </Button>
-          )}
-          <span className="spacer" />
-          <Button type="button" disabled={busy} onClick={() => save("draft")}>
-            Guardar borrador
-          </Button>
-          <Button
-            className="primary"
-            type="submit"
-            disabled={busy || !policy || (!sendToAgency && !checked) || !navigator.onLine}
-            icon={Check}
-          >
-            {sendToAgency ? "Enviar a gestoría" : policy?.can_approve ? "Aprobar y contabilizar" : "Confirmar y registrar"}
-          </Button>
-        </footer>
-      </form>
-    </dialog>
   );
 }
 

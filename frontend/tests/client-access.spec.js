@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';
-test('agency client activation, own chat access and departure disabling login',async({browser})=>{
-  const origin='http://127.0.0.1:8000',manager=await browser.newContext(),customer=await browser.newContext();
+test('agency client activation, own chat access and departure disabling login',async({browser,baseURL})=>{
+  const origin=baseURL,manager=await browser.newContext(),customer=await browser.newContext();
   const email=`owner-access-${Date.now()}@example.test`,clientEmail=`portal-${Date.now()}@example.test`,password='portal-local-password';
   const registration=await manager.request.post(origin+'/api/register',{headers:{Origin:origin},data:{name:'Gestoría del portal',email,password,account_type:'agency'}});expect(registration.status()).toBe(201);
   const owner=await registration.json(),headers={Origin:origin,'X-CSRF-Token':owner.csrf};

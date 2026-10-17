@@ -5,19 +5,27 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "vite build",
+    "build": "npm run typecheck && vite build",
     "test:e2e": "playwright test",
-    "test:unit": "node --test tests/*.unit.js"
+    "test:unit": "tsx --test tests/*.unit.js tests/*.unit.ts",
+    "typecheck": "tsc --noEmit",
+    "test:portfolio": "playwright test tests/app.spec.js tests/document-autofill.spec.js tests/registration-reserve.spec.js tests/invoice-delete.spec.js tests/session.spec.js tests/invalid-extraction.spec.js tests/account-deletion.spec.js tests/photo-recurring-packet.spec.js tests/client-access.spec.js"
   },
   "dependencies": {
+    "@fontsource/dm-sans": "^5.2.0",
+    "lucide-react": "^0.468.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "lucide-react": "^0.468.0",
-    "@fontsource/dm-sans": "^5.2.0"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "vite": "^7.0.0",
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^4.5.0",
-    "@playwright/test": "^1.55.0"
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^7.0.0"
   }
 }
